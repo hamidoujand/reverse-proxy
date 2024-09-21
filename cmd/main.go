@@ -2,9 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -55,7 +62,58 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("%s is not a valid duration: %w", shutdownTimeoutSTR, err)
 	}
-	//==============================================================================
+	//==========================================================================
+	//TLS Support
+
+	//generate private key
+	private, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("generate private key: %w", err)
+	}
+	now := time.Now()
+	then := now.Add(time.Hour * 24 * 365) //one year later
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName:   "reverse.proxy.name",
+			Organization: []string{"Reverse-Proxy"},
+		},
+		NotBefore:             now,
+		NotAfter:              then,
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		DNSNames:              []string{"localhost"},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &private.PublicKey, private)
+	if err != nil {
+		return fmt.Errorf("create certificate: %w", err)
+	}
+
+	certFile, err := os.Create("certificate.cer")
+	if err != nil {
+		return fmt.Errorf("create cert file: %w", err)
+	}
+	defer certFile.Close()
+
+	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		return fmt.Errorf("encode into pem: %w", err)
+	}
+
+	privateFile, err := os.Create("private.pem")
+	if err != nil {
+		return fmt.Errorf("create private file: %w", err)
+	}
+
+	defer privateFile.Close()
+
+	if err := pem.Encode(privateFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(private)}); err != nil {
+		return fmt.Errorf("encode private key: %w", err)
+	}
+
+	//==========================================================================
 	//Server
 	proxy, err := proxy.New("http://127.0.0.1:9000")
 
@@ -77,7 +135,7 @@ func run() error {
 
 	go func() {
 		log.Printf("proxy server running on: %s\n", host)
-		if err := server.ListenAndServe(); err != nil {
+		if err := server.ListenAndServeTLS("certificate.cer", "private.pem"); err != nil {
 			serverErrs <- err
 		}
 	}()

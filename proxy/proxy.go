@@ -6,7 +6,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+
+	"golang.org/x/net/http2"
 )
 
 // Proxy represents the proxy handler.
@@ -56,6 +59,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Header.Set("X-Forwarded-For", ip)
 
+	//add http2 support
+	if err := http2.ConfigureTransport(p.Client.Transport.(*http.Transport)); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintln(w, err)
+		return
+	}
+
 	//client
 	resp, err := p.Client.Do(r)
 	if err != nil {
@@ -84,10 +94,26 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	//handle trailers
+	trailerKeys := make([]string, 0, len(resp.Trailer))
+	for key := range resp.Trailer {
+		trailerKeys = append(trailerKeys, key)
+	}
+
+	//anounce the trailers
+	w.Header().Set("Trailer", strings.Join(trailerKeys, ","))
+
 	//copy response
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+
+	//fill the trailer values
+	for key, values := range resp.Trailer {
+		for _, val := range values {
+			w.Header().Set(key, val)
+		}
+	}
+
 	//here we close the done
 	close(done)
-
 }
