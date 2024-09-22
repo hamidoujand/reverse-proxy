@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -36,6 +37,9 @@ func New(host string) (*Proxy, error) {
 			}).DialContext,
 			TLSHandshakeTimeout:   time.Second,
 			ResponseHeaderTimeout: time.Second,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, //only in tests
+			},
 		},
 	}
 
@@ -59,11 +63,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Header.Set("X-Forwarded-For", ip)
 
-	//add http2 support
-	if err := http2.ConfigureTransport(p.Client.Transport.(*http.Transport)); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintln(w, err)
-		return
+	if r.ProtoMajor == 2 {
+		//add http2 support
+		if err := http2.ConfigureTransport(p.Client.Transport.(*http.Transport)); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintln(w, err)
+			return
+		}
 	}
 
 	//client

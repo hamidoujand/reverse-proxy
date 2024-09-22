@@ -1,6 +1,7 @@
 package proxy_test
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hamidoujand/reverse-proxy/proxy"
+	"golang.org/x/net/http2"
 )
 
 func TestNewProxyHandler(t *testing.T) {
@@ -161,3 +163,137 @@ func TestProxyStream(t *testing.T) {
 		t.Fatalf("chunkCount=%d, got %d", expectedChunkCount, chunkCount)
 	}
 }
+
+func TestHTTP2Proxy(t *testing.T) {
+	// Create an HTTP/2 server that will be the upstream server
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Log("Upstream server hit")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, "Hello World!")
+	}))
+
+	// Configure server for HTTP/2
+	server.TLS = &tls.Config{
+		NextProtos: []string{http2.NextProtoTLS}, // server supports HTTP/2
+	}
+
+	if err := http2.ConfigureServer(server.Config, &http2.Server{}); err != nil {
+		t.Fatalf("failed to configure http2 server: %s", err)
+	}
+
+	server.StartTLS()
+	defer server.Close()
+
+	// Create the reverse proxy pointing to the upstream server
+	p, err := proxy.New(server.URL) // Assuming proxy.New creates a reverse proxy
+	if err != nil {
+		t.Fatalf("failed to create new proxy server: %s", err)
+	}
+
+	// Create an HTTP/2 proxy server (this will forward requests to the upstream server)
+	proxyServer := httptest.NewUnstartedServer(p)
+	proxyServer.TLS = &tls.Config{
+		NextProtos: []string{http2.NextProtoTLS, "http/1.1"}, // Supports both HTTP/2 and HTTP/1.1
+	}
+
+	proxyServer.StartTLS() // Start the proxy server with TLS
+	defer proxyServer.Close()
+
+	// Create an HTTP client that can talk to the proxy server
+	client := &http.Client{
+		Transport: &http2.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // Skip certificate verification for the test
+			},
+		},
+	}
+
+	// Create a new GET request to the proxy server
+	req, err := http.NewRequest(http.MethodGet, proxyServer.URL, nil)
+	if err != nil {
+		t.Fatalf("failed to create a new request: %s", err)
+	}
+
+	// Make the request to the proxy server
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to do the request to proxy server: %s", err)
+	}
+	defer resp.Body.Close()
+
+	// Check the response status
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("statusCode=%d, got %d", http.StatusCreated, resp.StatusCode)
+	}
+
+	// Optional: read and check the response body if needed
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %s", err)
+	}
+
+	expectedBody := "Hello World!"
+	if string(body) != expectedBody {
+		t.Errorf("expected body %q, got %q", expectedBody, string(body))
+	}
+}
+
+// func TestHTTP2Proxy(t *testing.T) {
+// 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 		t.Log("tls server was hit")
+// 		w.WriteHeader(http.StatusCreated)
+// 		fmt.Fprint(w, "Hello World!")
+// 	}))
+
+// 	server.TLS = &tls.Config{
+// 		NextProtos: []string{http2.NextProtoTLS}, //server supports HTTP2
+// 	}
+
+// 	if err := http2.ConfigureServer(server.Config, &http2.Server{}); err != nil {
+// 		t.Fatalf("failed to configure http2 server: %s", err)
+// 	}
+
+// 	server.StartTLS()
+// 	defer server.Close()
+
+// 	p, err := proxy.New(server.URL)
+// 	if err != nil {
+// 		t.Fatalf("failed to create new proxy server: %s", err)
+// 	}
+
+// 	proxyServer := httptest.NewUnstartedServer(p)
+// 	proxyServer.TLS = &tls.Config{
+// 		NextProtos: []string{http2.NextProtoTLS, "http/1.1"},
+// 	}
+
+// 	proxyServer.StartTLS()
+// 	defer proxyServer.Close()
+
+// 	proxyCert := proxyServer.TLS.Certificates[0].Certificate[0]
+// 	rootCAs := x509.NewCertPool()
+// 	rootCAs.AppendCertsFromPEM(proxyCert)
+
+// 	client := http.Client{
+// 		Transport: &http2.Transport{
+// 			TLSClientConfig: &tls.Config{
+// 				RootCAs: rootCAs, //trust this dummy CA from test server.
+// 			},
+// 		},
+// 	}
+
+// 	req, err := http.NewRequest(http.MethodGet, proxyServer.URL, nil)
+// 	if err != nil {
+// 		t.Fatalf("failed to create a new request: %s", err)
+// 	}
+
+// 	resp, err := client.Do(req)
+// 	if err != nil {
+// 		t.Fatalf("failed to do the request to proxy server: %s", err)
+// 	}
+
+// 	defer resp.Body.Close()
+
+// 	if resp.StatusCode != http.StatusCreated {
+// 		t.Errorf("statusCode=%d, got %d", http.StatusCreated, resp.StatusCode)
+// 	}
+// }
