@@ -38,7 +38,7 @@ func New(host string) (*Proxy, error) {
 			TLSHandshakeTimeout:   time.Second,
 			ResponseHeaderTimeout: time.Second,
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, //only in tests
+				InsecureSkipVerify: true, //TODO: only for tests
 			},
 		},
 	}
