@@ -29,6 +29,16 @@ func main() {
 }
 
 func run() error {
+
+	env := os.Getenv("ENVIRONMENT")
+	if env == "" {
+		env = "development"
+	}
+
+	targetServer := os.Getenv("TARGET_SERVER")
+	if targetServer == "" {
+		return errors.New("TARGET_SERVER is required environment variable")
+	}
 	host := os.Getenv("HOST")
 	if host == "" {
 		return errors.New("HOST is required environment variable")
@@ -115,7 +125,8 @@ func run() error {
 
 	//==========================================================================
 	//Server
-	proxy, err := proxy.New("http://127.0.0.1:9000")
+	skipVerify := env != "production"
+	proxy, err := proxy.New(targetServer, skipVerify)
 
 	if err != nil {
 		return fmt.Errorf("new proxy handler: %w", err)

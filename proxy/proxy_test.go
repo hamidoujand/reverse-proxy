@@ -62,7 +62,7 @@ func TestNewProxyHandler(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p, err := proxy.New(server.URL)
+	p, err := proxy.New(server.URL, true)
 	if err != nil {
 		t.Fatalf("failed to create proxy handler: %s", err)
 	}
@@ -125,7 +125,7 @@ func TestProxyStream(t *testing.T) {
 
 	client := &http.Client{}
 
-	p, err := proxy.New(server.URL)
+	p, err := proxy.New(server.URL, true)
 	if err != nil {
 		t.Fatalf("failed to create a proxy: %s", err)
 	}
@@ -174,7 +174,7 @@ func TestHTTP2Proxy(t *testing.T) {
 
 	// Configure server for HTTP/2
 	server.TLS = &tls.Config{
-		NextProtos: []string{http2.NextProtoTLS}, // server supports HTTP/2
+		NextProtos: []string{http2.NextProtoTLS, "http/1.1"}, // server supports HTTP/2
 	}
 
 	if err := http2.ConfigureServer(server.Config, &http2.Server{}); err != nil {
@@ -185,7 +185,7 @@ func TestHTTP2Proxy(t *testing.T) {
 	defer server.Close()
 
 	// Create the reverse proxy pointing to the upstream server
-	p, err := proxy.New(server.URL) // Assuming proxy.New creates a reverse proxy
+	p, err := proxy.New(server.URL, true) // Assuming proxy.New creates a reverse proxy
 	if err != nil {
 		t.Fatalf("failed to create new proxy server: %s", err)
 	}

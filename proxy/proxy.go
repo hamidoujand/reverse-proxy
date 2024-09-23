@@ -19,7 +19,7 @@ type Proxy struct {
 	Client *http.Client
 }
 
-func New(host string) (*Proxy, error) {
+func New(host string, skipVerify bool) (*Proxy, error) {
 	var p Proxy
 	var err error
 
@@ -38,7 +38,7 @@ func New(host string) (*Proxy, error) {
 			TLSHandshakeTimeout:   time.Second,
 			ResponseHeaderTimeout: time.Second,
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, //TODO: only for tests
+				InsecureSkipVerify: skipVerify,
 			},
 		},
 	}
